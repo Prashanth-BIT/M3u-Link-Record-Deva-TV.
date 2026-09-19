@@ -1,0 +1,76 @@
+name: Devatv Stream Recorder (4 Hours)
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+jobs:
+  record-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          pip install requests yt-dlp
+
+      - name: Record Stream (4 Hours) and Send to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STREAM_URL: "https://play.applelive.in/devatv/devatv.m3u8"
+        run: |
+          python3 - <<'EOF'
+          import os
+          import subprocess
+          import requests
+          import sys
+          
+          bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+          stream_url = os.environ.get("STREAM_URL")
+          
+          output_file = "devatv_recording.mp4"
+          
+          # 4 மணி நேரம் = 14400 வினாடிகள்
+          print("Starting 4 hours recording with Live Progress...")
+          cmd = [
+              "ffmpeg", "-i", stream_url, 
+              "-t", "14400", 
+              "-c", "copy", 
+              "-progress", "pipe:1", 
+              output_file
+          ]
+          
+          process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+          
+          # ஒவ்வொரு நொடியும் புரோக்ரஸை பிரிண்ட் செய்தல்
+          for line in process.stdout:
+              if "time=" in line or "total_size=" in line:
+                  sys.stdout.write(line)
+                  sys.stdout.flush()
+                  
+          process.wait()
+          
+          print("Recording finished. Uploading to Telegram...")
+          
+          url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+          with open(output_file, "rb") as f:
+              files = {"document": f}
+              data = {"chat_id": chat_id, "caption": "Devatv Daily 4 Hours Stream Recording Complete!"}
+              response = requests.post(url, data=data, files=files)
+              
+          if response.status_code == 200:
+              print("Successfully uploaded to Telegram!")
+          else:
+              print(f"Failed to upload: {response.text}")
+          EOF
