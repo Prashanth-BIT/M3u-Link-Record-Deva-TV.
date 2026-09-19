@@ -1,4 +1,4 @@
-name: Devatv Stream Recorder (4 Hours)
+name: Devatv Stream Recorder (Stop & Upload)
 
 on:
   schedule:
@@ -23,7 +23,7 @@ jobs:
           sudo apt-get install -y ffmpeg
           pip install requests yt-dlp
 
-      - name: Record Stream (4 Hours) and Send to Telegram
+      - name: Record Stream and Upload on Stop
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -40,37 +40,50 @@ jobs:
           stream_url = os.environ.get("STREAM_URL")
           
           output_file = "devatv_recording.mp4"
+          process = None
           
-          # 4 மணி நேரம் = 14400 வினாடிகள்
-          print("Starting 4 hours recording with Live Progress...")
-          cmd = [
-              "ffmpeg", "-i", stream_url, 
-              "-t", "14400", 
-              "-c", "copy", 
-              "-progress", "pipe:1", 
-              output_file
-          ]
-          
-          process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-          
-          # ஒவ்வொரு நொடியும் புரோக்ரஸை பிரிண்ட் செய்தல்
-          for line in process.stdout:
-              if "time=" in line or "total_size=" in line:
-                  sys.stdout.write(line)
-                  sys.stdout.flush()
-                  
-          process.wait()
-          
-          print("Recording finished. Uploading to Telegram...")
-          
-          url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
-          with open(output_file, "rb") as f:
-              files = {"document": f}
-              data = {"chat_id": chat_id, "caption": "Devatv Daily 4 Hours Stream Recording Complete!"}
-              response = requests.post(url, data=data, files=files)
+          try:
+              print("Starting stream recording... (Cancel anytime to upload current video)")
+              cmd = [
+                  "ffmpeg", "-i", stream_url, 
+                  "-t", "14400", 
+                  "-c", "copy", 
+                  "-progress", "pipe:1", 
+                  output_file
+              ]
               
-          if response.status_code == 200:
-              print("Successfully uploaded to Telegram!")
-          else:
-              print(f"Failed to upload: {response.text}")
+              process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+              
+              for line in process.stdout:
+                  if "time=" in line or "total_size=" in line:
+                      sys.stdout.write(line)
+                      sys.stdout.flush()
+                      
+              process.wait()
+              
+          except KeyboardInterrupt:
+              print("Process interrupted by user.")
+          finally:
+              # நீங்கள் ஸ்டாப் செய்தாலும் அல்லது ரெக்கார்டிங் முடிந்தாலும் இந்தப் பகுதி இயங்கும்
+              if process and process.poll() is None:
+                  print("Stopping FFmpeg process...")
+                  process.terminate()
+                  process.wait()
+              
+              # வீடியோ ஃபைல் உள்ளதா மற்றும் காலியாக இல்லையா என சோதித்து டெலிகிராமிற்கு அனுப்புதல்
+              if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                  print("Uploading recorded video to Telegram...")
+                  url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+                  
+                  with open(output_file, "rb") as f:
+                      files = {"document": f}
+                      data = {"chat_id": chat_id, "caption": "Devatv Stream Recording (Stopped & Uploaded)!"}
+                      response = requests.post(url, data=data, files=files)
+                      
+                  if response.status_code == 200:
+                      print("Successfully uploaded to Telegram!")
+                  else:
+                      print(f"Failed to upload: {response.text}")
+              else:
+                  print("No video file found to upload.")
           EOF
